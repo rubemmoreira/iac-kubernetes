@@ -1,4 +1,4 @@
-﻿from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string
 import yfinance as yf
 import psycopg2
 import os
@@ -8,37 +8,29 @@ import hashlib
 
 app = Flask(__name__)
 
-# Configuração do PostgreSQL
-DB_HOST = os.getenv('DB_HOST', 'postgres')
+DB_HOST = os.getenv('DB_HOST', '192.168.3.37')
 DB_PORT = os.getenv('DB_PORT', '5432')
 DB_NAME = os.getenv('DB_NAME', 'stocks')
 DB_USER = os.getenv('DB_USER', 'stockuser')
 DB_PASSWORD = os.getenv('DB_PASSWORD', 'stock123')
 
-# Cache simples em memória (evita muitas consultas ao banco)
 cache = {}
 
 def get_db_connection():
-    """Conecta ao PostgreSQL"""
     try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD
+        return psycopg2.connect(
+            host=DB_HOST, port=DB_PORT,
+            database=DB_NAME, user=DB_USER, password=DB_PASSWORD
         )
-        return conn
     except Exception as e:
-        print(f"Erro ao conectar ao banco: {e}")
+        print(f"Erro: {e}")
         return None
 
 def init_db():
-    """Cria as tabelas no banco"""
     conn = get_db_connection()
     if conn:
-        cursor = conn.cursor()
-        cursor.execute('''
+        cur = conn.cursor()
+        cur.execute('''
             CREATE TABLE IF NOT EXISTS stock_queries (
                 id SERIAL PRIMARY KEY,
                 symbol VARCHAR(10) NOT NULL,
@@ -49,443 +41,90 @@ def init_db():
                 cache_key VARCHAR(64) UNIQUE
             )
         ''')
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_symbol_interval 
-            ON stock_queries(symbol, interval, period)
-        ''')
         conn.commit()
-        cursor.close()
+        cur.close()
         conn.close()
-        print("✅ Banco de dados inicializado")
+        print("✅ DB inicializado")
 
-def get_cache_key(symbol, interval, period):
-    """Gera uma chave única para cache"""
-    key_str = f"{symbol}_{interval}_{period}"
-    return hashlib.md5(key_str.encode()).hexdigest()
-
-def get_cached_data(symbol, interval, period):
-    """Busca dados no cache do banco (últimos 30 minutos)"""
-    cache_key = get_cache_key(symbol, interval, period)
-    
-    # Verificar cache em memória primeiro
-    if cache_key in cache:
-        cache_time = cache[cache_key]['timestamp']
-        if datetime.now() - cache_time < timedelta(minutes=30):
-            return cache[cache_key]['data']
-    
-    # Buscar no banco
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT result_data, query_date FROM stock_queries 
-            WHERE cache_key = %s 
-            AND query_date > NOW() - INTERVAL '30 minutes'
-            ORDER BY query_date DESC LIMIT 1
-        ''', (cache_key,))
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        if result:
-            data = result[0]
-            # Atualizar cache em memória
-            cache[cache_key] = {
-                'data': data,
-                'timestamp': datetime.now()
-            }
-            return data
-    return None
-
-def save_to_cache(symbol, interval, period, data):
-    """Salva dados no cache"""
-    cache_key = get_cache_key(symbol, interval, period)
-    
-    # Salvar no banco
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO stock_queries (symbol, interval, period, result_data, cache_key)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (cache_key) DO UPDATE SET result_data = EXCLUDED.result_data, query_date = NOW()
-        ''', (symbol, interval, period, json.dumps(data), cache_key))
-        conn.commit()
-        cursor.close()
-        conn.close()
-    
-    # Salvar em memória
-    cache[cache_key] = {
-        'data': data,
-        'timestamp': datetime.now()
-    }
-
-# Rota principal - Interface do usuário
 @app.route('/')
 def index():
-    return render_template_string('''
+    return '''
     <!DOCTYPE html>
     <html>
-    <head>
-        <title>📊 Consultor de Ações - Yahoo Finance</title>
-        <meta charset="UTF-8">
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                padding: 20px;
-            }
-            .container {
-                max-width: 1200px;
-                margin: 0 auto;
-            }
-            .card {
-                background: white;
-                border-radius: 15px;
-                padding: 30px;
-                margin-bottom: 20px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-            }
-            h1 {
-                color: #333;
-                margin-bottom: 10px;
-            }
-            .subtitle {
-                color: #666;
-                margin-bottom: 30px;
-            }
-            .form-group {
-                margin-bottom: 20px;
-            }
-            label {
-                display: block;
-                margin-bottom: 8px;
-                font-weight: bold;
-                color: #555;
-            }
-            input, select {
-                width: 100%;
-                padding: 12px;
-                border: 2px solid #ddd;
-                border-radius: 8px;
-                font-size: 16px;
-                transition: border-color 0.3s;
-            }
-            input:focus, select:focus {
-                outline: none;
-                border-color: #667eea;
-            }
-            button {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                border: none;
-                padding: 12px 30px;
-                border-radius: 8px;
-                font-size: 16px;
-                cursor: pointer;
-                transition: transform 0.2s;
-            }
-            button:hover {
-                transform: translateY(-2px);
-            }
-            .result-card {
-                background: #f8f9fa;
-                border-radius: 10px;
-                padding: 20px;
-                margin-top: 20px;
-            }
-            .result-header {
-                font-weight: bold;
-                margin-bottom: 15px;
-                color: #333;
-            }
-            .stock-table {
-                width: 100%;
-                border-collapse: collapse;
-            }
-            .stock-table th, .stock-table td {
-                padding: 12px;
-                text-align: left;
-                border-bottom: 1px solid #ddd;
-            }
-            .stock-table th {
-                background: #667eea;
-                color: white;
-            }
-            .stock-table tr:hover {
-                background: #f1f1f1;
-            }
-            .loading {
-                display: none;
-                text-align: center;
-                padding: 20px;
-            }
-            .error {
-                color: red;
-                padding: 10px;
-                background: #ffe6e6;
-                border-radius: 8px;
-                margin-top: 10px;
-            }
-            .stats {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 15px;
-                margin-bottom: 20px;
-            }
-            .stat-card {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 15px;
-                border-radius: 10px;
-                text-align: center;
-            }
-            .stat-value {
-                font-size: 24px;
-                font-weight: bold;
-            }
-            .stat-label {
-                font-size: 12px;
-                margin-top: 5px;
-                opacity: 0.9;
-            }
-        </style>
+    <head><title>Consultor de Ações</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 50px auto; padding: 20px; }
+        input, select, button { padding: 10px; margin: 5px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #4CAF50; color: white; }
+    </style>
     </head>
     <body>
-        <div class="container">
-            <div class="card">
-                <h1>📈 Consultor de Ações</h1>
-                <p class="subtitle">Consulte cotações históricas via Yahoo Finance</p>
-                
-                <form id="stockForm">
-                    <div class="form-group">
-                        <label>Código da Ação</label>
-                        <input type="text" id="symbol" placeholder="Ex: PETR4, VALE3, ITUB4, BBDC4" required>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>Timeframe (intervalo entre cotações)</label>
-                        <select id="interval">
-                            <option value="1m">1 minuto</option>
-                            <option value="5m">5 minutos</option>
-                            <option value="15m">15 minutos</option>
-                            <option value="30m">30 minutos</option>
-                            <option value="1h">1 hora</option>
-                            <option value="1d" selected>1 dia</option>
-                            <option value="1wk">1 semana</option>
-                            <option value="1mo">1 mês</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>Período (histórico)</label>
-                        <select id="period">
-                            <option value="1d">1 dia</option>
-                            <option value="5d">5 dias</option>
-                            <option value="1mo">1 mês</option>
-                            <option value="3mo" selected>3 meses</option>
-                            <option value="6mo">6 meses</option>
-                            <option value="1y">1 ano</option>
-                            <option value="2y">2 anos</option>
-                            <option value="5y">5 anos</option>
-                        </select>
-                    </div>
-                    
-                    <button type="submit">📊 Consultar</button>
-                </form>
-                
-                <div id="loading" class="loading">
-                    <p>⏳ Buscando dados...</p>
-                </div>
-                <div id="result"></div>
+        <h1>📈 Consultor de Ações</h1>
+        <form id="form">
+            <div><label>Código:</label><input type="text" id="symbol" placeholder="PETR4" required></div>
+            <div><label>Timeframe:</label>
+                <select id="interval"><option value="1d">1 dia</option><option value="1wk">1 semana</option><option value="1mo">1 mês</option></select>
             </div>
-        </div>
-        
+            <div><label>Período:</label>
+                <select id="period"><option value="1mo">1 mês</option><option value="3mo">3 meses</option><option value="6mo">6 meses</option><option value="1y">1 ano</option></select>
+            </div>
+            <button type="submit">Consultar</button>
+        </form>
+        <div id="resultado"></div>
         <script>
-            const form = document.getElementById('stockForm');
-            const loading = document.getElementById('loading');
-            const resultDiv = document.getElementById('result');
-            
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                
-                const symbol = document.getElementById('symbol').value.toUpperCase();
-                const interval = document.getElementById('interval').value;
-                const period = document.getElementById('period').value;
-                
-                loading.style.display = 'block';
-                resultDiv.innerHTML = '';
-                
-                try {
-                    const response = await fetch(`/api/stock?symbol=${symbol}&interval=${interval}&period=${period}`);
-                    const data = await response.json();
-                    
-                    if (response.ok) {
-                        displayResult(data, symbol);
-                    } else {
-                        resultDiv.innerHTML = `<div class="error">❌ Erro: ${data.error}</div>`;
-                    }
-                } catch (error) {
-                    resultDiv.innerHTML = `<div class="error">❌ Erro ao consultar: ${error.message}</div>`;
-                } finally {
-                    loading.style.display = 'none';
-                }
+        document.getElementById('form').onsubmit = async (e) => {
+            e.preventDefault();
+            const symbol = document.getElementById('symbol').value.toUpperCase();
+            const interval = document.getElementById('interval').value;
+            const period = document.getElementById('period').value;
+            const res = await fetch(`/api/stock?symbol=${symbol}&interval=${interval}&period=${period}`);
+            const data = await res.json();
+            if (data.error) {
+                document.getElementById('resultado').innerHTML = `<p style="color:red">Erro: ${data.error}</p>`;
+                return;
+            }
+            let html = '<h2>' + data.symbol + '</h2><table><tr><th>Data</th><th>Abertura</th><th>Máxima</th><th>Mínima</th><th>Fechamento</th></tr>';
+            data.data.slice(0, 50).forEach(item => {
+                html += `<tr><td>${item.date}</td><td>R$ ${item.open}</td><td>R$ ${item.high}</td><td>R$ ${item.low}</td><td><strong>R$ ${item.close}</strong></td></tr>`;
             });
-            
-            function displayResult(data, symbol) {
-                // Estatísticas
-                const stats = calculateStats(data.data);
-                
-                let html = `
-                    <div class="result-card">
-                        <div class="result-header">📊 Resultados para ${symbol}</div>
-                        <div class="stats">
-                            <div class="stat-card">
-                                <div class="stat-value">R$ ${stats.avg}</div>
-                                <div class="stat-label">Média</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-value">R$ ${stats.min}</div>
-                                <div class="stat-label">Mínima</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-value">R$ ${stats.max}</div>
-                                <div class="stat-label">Máxima</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-value">${stats.var}%</div>
-                                <div class="stat-label">Volatilidade</div>
-                            </div>
-                        </div>
-                        <table class="stock-table">
-                            <thead>
-                                <tr>
-                                    <th>Data</th>
-                                    <th>Abertura</th>
-                                    <th>Máxima</th>
-                                    <th>Mínima</th>
-                                    <th>Fechamento</th>
-                                    <th>Volume</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                `;
-                
-                data.data.slice(0, 100).forEach(item => {
-                    html += `
-                        <tr>
-                            <td>${item.date}</td>
-                            <td>R$ ${item.open}</td>
-                            <td>R$ ${item.high}</td>
-                            <td>R$ ${item.low}</td>
-                            <td><strong>R$ ${item.close}</strong></td>
-                            <td>${item.volume.toLocaleString()}</td>
-                        </tr>
-                    `;
-                });
-                
-                html += `
-                            </tbody>
-                        </table>
-                        <p style="margin-top: 15px; color: #666; font-size: 12px;">
-                            📌 Fonte: Yahoo Finance | ${data.data.length} registros | ${data.cached ? '✅ Dados do cache' : '🌐 Dados da API'}
-                        </p>
-                    </div>
-                `;
-                
-                resultDiv.innerHTML = html;
-            }
-            
-            function calculateStats(data) {
-                const closes = data.map(d => parseFloat(d.close));
-                const avg = (closes.reduce((a,b) => a + b, 0) / closes.length).toFixed(2);
-                const min = Math.min(...closes).toFixed(2);
-                const max = Math.max(...closes).toFixed(2);
-                
-                // Volatilidade simples
-                const variance = closes.reduce((acc, val) => acc + Math.pow(val - avg, 2), 0) / closes.length;
-                const varPercent = (Math.sqrt(variance) / avg * 100).toFixed(2);
-                
-                return { avg, min, max, var: varPercent };
-            }
+            html += '</table><p>' + data.data.length + ' registros</p>';
+            document.getElementById('resultado').innerHTML = html;
+        };
         </script>
     </body>
     </html>
-    ''')
+    '''
 
-# API para consultar ações
 @app.route('/api/stock')
 def get_stock():
     symbol = request.args.get('symbol', '').upper()
     interval = request.args.get('interval', '1d')
-    period = request.args.get('period', '3mo')
-    
+    period = request.args.get('period', '1mo')
     if not symbol:
-        return jsonify({'error': 'Símbolo da ação é obrigatório'}), 400
-    
-    # Verificar cache primeiro
-    cached_data = get_cached_data(symbol, interval, period)
-    if cached_data:
-        return jsonify({
-            'symbol': symbol,
-            'data': cached_data,
-            'cached': True,
-            'count': len(cached_data)
-        })
-    
+        return jsonify({'error': 'Símbolo obrigatório'}), 400
     try:
-        # Buscar dados do Yahoo Finance
-        ticker = yf.Ticker(f"{symbol}.SA" if symbol.endswith(('3', '4', '5', '6', '7', '8', '9')) else symbol)
-        
-        # Mapear intervalos para o formato do yfinance
-        interval_map = {
-            '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
-            '1h': '1h', '1d': '1d', '1wk': '1wk', '1mo': '1mo'
-        }
-        
-        period_map = {
-            '1d': '1d', '5d': '5d', '1mo': '1mo', '3mo': '3mo',
-            '6mo': '6mo', '1y': '1y', '2y': '2y', '5y': '5y'
-        }
-        
-        hist = ticker.history(
-            interval=interval_map.get(interval, '1d'),
-            period=period_map.get(period, '3mo')
-        )
-        
+        ticker = yf.Ticker(f"{symbol}.SA" if symbol[-1].isdigit() else symbol)
+        hist = ticker.history(interval=interval, period=period)
         if hist.empty:
-            return jsonify({'error': f'Nenhum dado encontrado para {symbol}'}), 404
-        
-        # Formatar dados
+            return jsonify({'error': f'Nenhum dado para {symbol}'}), 404
         result = []
         for date, row in hist.iterrows():
             result.append({
-                'date': date.strftime('%Y-%m-%d %H:%M'),
+                'date': date.strftime('%Y-%m-%d'),
                 'open': round(row['Open'], 2),
                 'high': round(row['High'], 2),
                 'low': round(row['Low'], 2),
-                'close': round(row['Close'], 2),
-                'volume': int(row['Volume'])
+                'close': round(row['Close'], 2)
             })
-        
-        # Salvar no cache
-        save_to_cache(symbol, interval, period, result)
-        
-        return jsonify({
-            'symbol': symbol,
-            'data': result,
-            'cached': False,
-            'count': len(result)
-        })
-        
+        return jsonify({'symbol': symbol, 'data': result})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/health')
 def health():
-    return {'status': 'healthy', 'service': 'stock-consultant'}
+    return {'status': 'healthy'}
 
 if __name__ == '__main__':
     init_db()

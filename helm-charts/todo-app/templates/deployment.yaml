@@ -1,4 +1,4 @@
-﻿apiVersion: apps/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: todo-app
@@ -31,7 +31,5 @@ spec:
           value: {{ .Values.database.user | quote }}
         - name: DB_PASSWORD
           value: {{ .Values.database.password | quote }}
-        - name: KAFKA_BROKERS
-          value: {{ .Values.kafka.brokers | quote }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
