@@ -1,29 +1,21 @@
-﻿replicaCount: 2
+replicaCount: 2
 
 image:
   repository: rubemmoreira/todo-app
-  tag: 115ea0113c54743bc1413cefc1970c2eeeb5d921
+  tag: f4eb4511a645116bd61bbe5a108d5b542b7358b9
   pullPolicy: Always
 
 service:
   type: NodePort
   port: 5000
-  nodePort: 30902
-
-ingress:
-  enabled: false
-  host: todo.local
-  className: nginx
+  nodePort: 30657
 
 database:
-  host: postgres.todo-app.svc.cluster.local
-  port: 5432
-  name: todos
-  user: todoapp
-  password: todo123
-
-kafka:
-  brokers: todo-kafka-kafka-bootstrap.kafka:9092
+  host: 192.168.3.37
+  port: "5432"
+  name: stocks
+  user: stockuser
+  password: stock123
 
 resources:
   limits:
