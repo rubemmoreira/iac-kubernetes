@@ -1,0 +1,27 @@
+﻿name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'helm-charts/**'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Build Docker image
+        run: |
+          docker build -t todo-app:latest ./app
+          
+      - name: Save image
+        run: |
+          docker save todo-app:latest | gzip > todo-app.tar.gz
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: todo-app-image
+          path: todo-app.tar.gz

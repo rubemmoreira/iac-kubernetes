@@ -1,0 +1,33 @@
+﻿replicaCount: 2
+
+image:
+  repository: todo-app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 5000
+
+ingress:
+  enabled: true
+  host: todo.local
+  className: nginx
+
+database:
+  host: postgres.todo-app.svc.cluster.local
+  port: 5432
+  name: todos
+  user: todoapp
+  password: todo123
+
+kafka:
+  brokers: todo-kafka-kafka-bootstrap.kafka:9092
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
