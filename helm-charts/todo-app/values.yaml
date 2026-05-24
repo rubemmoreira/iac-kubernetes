@@ -1,16 +1,17 @@
 ﻿replicaCount: 2
 
 image:
-  repository: todo-app
+  repository: rubemmoreira/todo-app
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 service:
-  type: ClusterIP
+  type: NodePort
   port: 5000
+  nodePort: 30902
 
 ingress:
-  enabled: true
+  enabled: false
   host: todo.local
   className: nginx
 
