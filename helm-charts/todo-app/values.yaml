@@ -2,7 +2,7 @@
 
 image:
   repository: rubemmoreira/todo-app
-  tag: latest
+  tag: 115ea0113c54743bc1413cefc1970c2eeeb5d921
   pullPolicy: Always
 
 service:
