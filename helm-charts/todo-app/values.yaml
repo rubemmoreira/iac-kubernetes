@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: rubemmoreira/todo-app
-  tag: latest
+  tag: f4eb4511a645116bd61bbe5a108d5b542b7358b9
   pullPolicy: Always
 
 service:
