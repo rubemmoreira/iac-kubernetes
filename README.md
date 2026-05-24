@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ﻿# Infraestrutura como Código - Kubernetes
 
 ## Componentes
@@ -11,3 +12,7 @@
 1. Clone o repositório
 2. Configure kubectl
 3. Aplique os manifests
+=======
+# iac-kubernetes
+Infraestrutura como código
+>>>>>>> 12a37cda31801bfc2d1bd1501890098a1f1fdfc4
